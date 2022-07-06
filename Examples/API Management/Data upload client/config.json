@@ -1,0 +1,11 @@
+{
+    "tenantkey": "<tenant/api key>",
+    "repoStorage": {
+        "Account": "<name of storage account>",
+        "AccountKey": "<access key of storage account>",
+        "Container": "<container name>"
+    },
+    "workspaces": {
+        "<workspace name>": "<workspace key>"
+    }
+}

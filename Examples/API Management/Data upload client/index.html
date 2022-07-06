@@ -1,0 +1,590 @@
+<html>
+	<head>
+		<title>ACME Hospital data repository</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0-beta1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-0evHe/X+R7YkIZDRvuzKMRqM+OrBnVFBL6DOitfPri4tjfHxaWutUpFmBp4vmVor" crossorigin="anonymous">
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0-beta1/dist/js/bootstrap.bundle.min.js" integrity="sha384-pprn3073KE6tl6bjs2QrFaJGz5/SUsLqktiwsUTF55Jfv3qYSDhgCecCxMW52nD2" crossorigin="anonymous"></script>
+        <script type="text/javascript">
+            var submittingWorkspace = false;
+            var submittingContainer = false;
+            var submittingUpload = false;
+            var intervalID = null;
+            var allWorkspaces = {};
+            var allContainers = {};
+            var confirmFn = null;
+
+            function $(id) { return document.getElementById(id); }
+            function CN(tag) { return document.createElement(tag); }
+            function CT(text) { return document.createTextNode(text); }
+            function SetDisabled(node, disabled) {
+                if (disabled) {
+                    node.removeAttribute('disabled')
+                } else {
+                    node.setAttribute('disabled', 'disabled')
+                }
+            }
+            function SetHidden(node, hidden) {
+                node.style.display = hidden ? 'none' : ''
+            }
+            function filicide(node) {
+                while (node.firstChild) {
+                    node.removeChild(node.firstChild)
+                }
+            }
+            function CallAPI(url, obj, onReady, onError, method='GET') {
+                var req = new XMLHttpRequest()
+                req.open(method, url, true);
+                req.onreadystatechange = function(progress) {
+                    if (req.readyState == 4) {
+                        if (req.status == 200) {
+                            try {
+                                if (req.response.length > 0) {
+                                    parsedObject = JSON.parse(req.response);
+                                    onReady(parsedObject)
+                                } else {
+                                    onReady(req.responseText)
+                                }
+                            } catch {
+                                onReady(req.responseText)
+                            }
+                        } else {
+                            onError(req.response)
+                        }
+                    }
+                }
+                req.onerror = onError
+                if (obj) {
+                    req.send(JSON.stringify(obj));
+                } else {
+                    req.send();
+                }
+            }
+            function togglefold(e) {
+                const node = e.target.parentNode;
+                if (node.classList.contains('folded'))
+                    node.classList.remove('folded');
+                else    
+                    node.classList.add('folded');
+                e.stopPropagation();
+            }
+            function toggleselect(e) {
+                if (!e || !e.ctrlKey) {
+                    const nodes = Object.assign([], document.getElementsByClassName('selected'));
+                    for(let selnode of nodes) {
+                        selnode.classList.remove('selected');
+                    }
+                }
+                if (e) {
+                    const node = e.target.parentNode;
+                    if (node.classList.contains('selected'))
+                        node.classList.remove('selected');
+                    else
+                        node.classList.add('selected');
+                    e.stopPropagation()
+                }
+                updateWindow()
+            }
+            function formatSize(size) {
+                for (let x of ' kMGT') {
+                    if (size > 2048)
+                        size /= 1024;
+                    else
+                        return size.toFixed(2) + ' ' + (x == ' ' ? 'bytes' : x + 'b')
+                }
+            }
+            function confirm_me(text, callbackFn) {
+                $('modal-backdrop').style.display='block';
+                $('modal-dialog').style.display = 'block';
+                $('modal-dialog-wrapper').style.display = 'block';
+                filicide($('modal-text'))
+                $('modal-text').appendChild(CT(text))
+                confirmFn = callbackFn
+            }
+            function do_confirm(result) {
+                $('modal-backdrop').style.display='none';
+                $('modal-dialog').style.display = 'none';
+                $('modal-dialog-wrapper').style.display = 'none';
+                if (result && confirmFn) {
+                    confirmFn();
+                    confirmFn = null;
+                }
+            }
+            
+            function alert_me(msg) {
+                filicide($('alert-text'))
+                $('alert-text').appendChild(CT(msg))
+                SetHidden($('alert-div'), false);
+                setTimeout(() => {
+                    SetHidden($('alert-div'), true);
+                }, 3000)
+            }
+            function info_me(msg) {
+                filicide($('alert-info-text'))
+                $('alert-info-text').appendChild(CT(msg))
+                SetHidden($('alert-info-div'), false);
+                setTimeout(() => {
+                    SetHidden($('alert-info-div'), true);
+                }, 3000)
+            }
+
+            function updateWindow() {
+                const targetWorkspace = $('target-workspace').value
+                const targetContainer = $('target-container').value
+                const validNewWorkspace = /^dws-\d+-\w+$/.test($('new-workspace-name').value) && /^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9A-Fa-f]{12}$/.test($('new-workspace-key').value) && !submittingWorkspace
+                const isUploading = document.getElementsByClassName('uploading').length > 0;
+                SetDisabled($('start-upload-button'), document.getElementsByClassName('selected').length > 0)
+                SetDisabled($('commit-upload-button'), !isUploading && targetContainer && targetContainer !== '[New]')
+                SetDisabled($('cancel-upload-button'), targetContainer && targetContainer != '[New]');              
+                SetDisabled($("new-workspace-button"), validNewWorkspace);
+                SetHidden($('target-container-div'), !targetWorkspace || targetWorkspace == '[New]')
+                SetHidden($('new-workspace-div'), targetWorkspace != '[New]')
+                SetHidden($('new-container-div'), targetContainer != '[New]')
+                filicide($('selected-container-identity'))
+                $('selected-container-identity').appendChild(CT(targetContainer))
+                SetDisabled($('delete-workspace-button'), !(!targetWorkspace || targetWorkspace == '[New]'))
+            }
+
+            function onDeleteWorkspaceClick() {
+                confirm_me('Do you really want to delete the API key for this workspace?', function() {
+                    CallAPI('/workspaces/' + $('target-workspace').value, null, function() {
+                        loadWorkspaces();
+                        info_me('Workspace key deleted');
+                    }, function(err) { alert_me(err) }, 'DELETE')
+                })
+            }
+
+            function onAddContainerClick() {
+                submittingContainer = true;
+                updateWindow();
+                const selectedWorkspace = $('target-workspace').value
+
+                const title = $('new-container-title').value
+                CallAPI('/workspaces/' + selectedWorkspace + '/containers?title=' + encodeURIComponent(title), null, function(response) {
+                    submittingContainer = false;
+                    const newcontainername = Object.getOwnPropertyNames(response)[0]
+                    allContainers[newcontainername] = {
+                        'title': response[newcontainername]['title'] || '<no title>'
+                    }
+                    const newnode = CN('OPTION')
+                    newnode.appendChild(CT(allContainers[newcontainername].title + ' (' + newcontainername + ')'))
+                    newnode.setAttribute('value', newcontainername)
+                    $('target-container').appendChild(newnode);
+                    $('new-container-title').value = ''
+                    $('target-container').value = newcontainername
+                    info_me('container '+ newcontainername  +' created succesfully')
+                    updateWindow();
+                }, function(response) {
+                    submittingWorkspace = false;
+                    alert_me(response)
+                    updateWindow();
+                }, 'POST')
+            }
+            function onStartUploadClick() {
+                const selectedWorkspace = $('target-workspace').value
+                const selectedContainer = $('target-container').value
+                const allfilenodes = document.getElementsByClassName('selected')
+                const allfiles = []
+                for(let node of allfilenodes) {
+                    allfiles.push(node.getAttribute('data-filename'))
+                }
+
+                CallAPI('/workspaces/' + selectedWorkspace + '/containers/' + selectedContainer, { 'files': allfiles }, function() {
+                    if (intervalID != null) {
+                        clearInterval(intervalID);
+                    }
+                    intervalID = setInterval(updateRemoteFiles, 10000)
+                    setTimeout(updateRemoteFiles, 1000)
+                    info_me('upload started')
+                }, function(er) { alert_me(er) }, 'POST')
+            }
+            function onCancelUploadClick() {
+                const selectedWorkspace = $('target-workspace').value
+                const selectedContainer = $('target-container').value
+                confirm_me('Do you want to cancel (delete) the upload package ' + selectedContainer + '?', function() {
+                    CallAPI('/workspaces/' + selectedWorkspace + '/containers/' + selectedContainer, null, function() {
+                        info_me('success, the package is deleted')
+                        delete allContainers[selectedContainer]
+                        updateContainerList(); 
+                    }, function(er) { alert_me(er) }, 'DELETE')
+                })
+            }
+            function onCommitUploadClick() {
+                const selectedWorkspace = $('target-workspace').value
+                const selectedContainer = $('target-container').value
+                confirm_me('Do you want to commit the upload package ' + selectedContainer + '?', function() {
+                    CallAPI('/workspaces/' + selectedWorkspace + '/containers/' + selectedContainer, null, function(){
+                        info_me('success, the files are being moved to the workspace')
+                    }, function(er) { alert_me(er) }, 'PATCH')
+                })
+            }
+            function onAddWorkspaceClick() {
+                const selectedWorkspace = $('target-workspace').value
+                const obj = {
+                    'apiKey': $('new-workspace-key').value,
+                    'name': $('new-workspace-name').value,
+                }
+                submittingWorkspace = true;
+                updateWindow();
+
+                CallAPI('/workspaces', obj, function(response) {
+                    submittingWorkspace = false;
+                    $('new-workspace-key').value = ''
+                    $('new-workspace-name').value = ''
+                    const newnode = CN('OPTION')
+                    newnode.appendChild(CT(obj.name))
+                    newnode.setAttribute('value', obj.name)
+                    $('target-workspace').appendChild(newnode);
+                    $('target-workspace').value = response.name
+                    loadContainers()
+                    info_me('workspace key added succesfully')
+                }, function(response) {
+                    submittingWorkspace = false;
+                    alert_me(response)
+                    updateWindow();
+                }, 'POST')
+            }
+
+            function loadWorkspaces() {
+                CallAPI('/workspaces', null, function(workspaceList) {
+                    allWorkspaces = workspaceList
+                    updateWorkspaceList()
+                }, function(response) {
+                    alert_me(response)
+                })
+            }
+            function loadContainers() {
+                const selectedWorkspace = $('target-workspace').value
+                if (selectedWorkspace && selectedWorkspace !== '[New]') {
+                    CallAPI('/workspaces/' + selectedWorkspace + '/containers', null, function(containerList) {
+                        allContainers = containerList
+                        updateContainerList()
+                    }, function(response) {
+                        alert_me(response)
+                    })
+                } else {
+                    allContainers = [];
+                    updateContainerList();
+                }
+            }
+
+            function updateWorkspaceList() {
+                var selectnode = $('target-workspace');
+                filicide(selectnode);
+                const newnode = CN('OPTION')
+                newnode.setAttribute('value', '[New]')
+                newnode.appendChild(CT('[New workspace]'));
+                selectnode.appendChild(newnode)
+                sel = null;
+                for (let workspaceName of Object.getOwnPropertyNames(allWorkspaces)) {
+                    if (sel == null) sel = workspaceName
+                    const node = CN('OPTION')
+                    node.setAttribute('value', workspaceName);
+                    node.appendChild(CT(workspaceName));
+                    selectnode.appendChild(node);
+                }
+                if (sel) {
+                    $('target-workspace').value = sel
+                    updateContainerList();
+                    loadContainers();
+                }
+                updateWindow();                
+            }
+            function updateContainerList() {
+                selectedWorkspace = $('target-workspace').value
+                let outpnode = $('selected-workspace-name');
+                filicide(outpnode);
+                outpnode.appendChild(CT(selectedWorkspace))
+
+                var selectnode = $('target-container');
+                filicide(selectnode);
+                const newnode = CN('OPTION')
+                newnode.setAttribute('value', '[New]')
+                newnode.appendChild(CT('[New container]'));
+                selectnode.appendChild(newnode)
+                sel = null;
+                for (let container of Object.getOwnPropertyNames(allContainers)) {
+                    if (sel == null) sel = container
+                    const node = CN('OPTION')
+                    node.setAttribute('value', container);
+                    node.appendChild(CT(allContainers[container].title + ' (' + container + ')'));
+                    selectnode.appendChild(node);
+                }
+                if (sel) {
+                    $('target-container').value = sel
+                    updateRemoteFiles();
+                }
+                updateWindow()
+            }
+
+            function updateRemoteFiles() {
+                selectedWorkspace = $('target-workspace').value
+                selectedContainer = $('target-container').value
+
+                if (selectedContainer !== '[New]') {
+                    CallAPI('/workspaces/' + selectedWorkspace + '/containers/' + selectedContainer, null, (filelist) => {
+                        updateListofFiles($('remote-files'), filelist, '', false)
+                        needsRepeating = false;
+                        for(let file of filelist) {
+                            if (file.copystate !== 'success') {
+                                needsRepeating = true
+                                break
+                            }
+                        }
+                        if (intervalID != null && !needsRepeating) {
+                            clearInterval(intervalID)
+                            intervalID = null
+                            info_me('Upload succeeded')
+                        }
+                    }, (err) => {
+                        if (intervalID) {
+                            clearInterval(intervalID)
+                        }
+                        filicide($('remote-files'))
+                        $('remote-files').appendChild(CT('Failed listing files'))
+                        alert_me(err)
+                    })
+                } else {
+                    updateListofFiles($('remote-files'), [])
+                }
+                updateWindow()
+            }
+
+            function updateLocalFiles() {
+                CallAPI('/files', null, function(filelist) {
+                    updateListofFiles($('local-files'), filelist)
+                    updateWindow();
+                }, function(err) { alert_me(err) })
+            }
+
+            function updateListofFiles(targetnode, filelist, className, defaultFolded = true) {
+                if (!filelist)
+                    return;
+                const directorynodes = new Map()
+                directorynodes.set('/', CN('UL'))
+                
+                for(let file of filelist.sort((a, b) => a.name.localeCompare(b.name))) {
+                    let items = file.name.split('/');
+                    let root = '/';
+                    for (let x = 0; x < items.length; x++) {
+                        if (items[x] == '')
+                            continue;
+
+                        if (x == items.length - 1) {
+                            const newn = CN('SPAN')
+                            const newli = CN('LI');
+                            let copy = '';
+                            if (file.copystate !== 'success') {
+                                copy = ', copying ' + file.copyprogress
+                            }
+                            newn.appendChild(CT(items[x] + ' ('+formatSize(parseInt(file.size))+copy+')'));
+                            newn.addEventListener('click', toggleselect);
+                            newli.appendChild(newn);
+                            if (className) {
+                                newli.classList.add(className)
+                            }
+                            newli.setAttribute('data-filename', file.name);
+                            let ext = file.name.substr(file.name.lastIndexOf('.')+1)
+                            if (['png', 'jpg', 'bmp', 'gif'].includes(ext)) ext = 'image'
+                            else if (['wmv', 'ts', 'mov', 'mkv', 'avi', 'mp4', 'mp3'].includes(ext)) ext = 'media'
+                            else if (!['css', 'xlsx', 'html', 'js', 'jar' ,'ppt', 'ps1', 'py', 'r', 'txt', 'docx', 'exe', 'xml', 'zip'].includes(ext)) ext = 'file';
+                            newli.style.backgroundImage = "url('/static/images/" + ext + "32.png')"
+                            directorynodes.get(root).appendChild(newli)
+                            break;
+                        }
+                        if (!directorynodes.has(root + items[x] + '/')) {
+                            const newli = CN('LI');
+                            const newnodeul = CN('UL');
+                            const foldername = CN('SPAN')
+                            foldername.appendChild(CT(items[x]))
+                            newli.appendChild(foldername)
+                            newli.appendChild(newnodeul)
+                            if (root == '/' && defaultFolded) newli.classList.add('folded')
+                            newli.style.backgroundImage = "url('/static/images/folder32.png')"
+                            foldername.addEventListener('click', togglefold);
+                            directorynodes.set(root + items[x] + '/', newnodeul)
+                            const p = directorynodes.get(root)
+                            let inserted = false;
+                            for (let n = 0; n < p.childNodes.length; n++) {
+                                if (p.childNodes[n].tagName == 'LI') {
+                                    inserted = true;
+                                    p.insertBefore(newli, p.childNodes[n])
+                                    break;
+                                }
+                            }
+
+                            if (!inserted)
+                                p.appendChild(newli)
+                        }
+                        root += items[x] + '/'
+                    }
+                }
+                filicide(targetnode)
+                targetnode.appendChild(directorynodes.get('/'))
+            }
+
+            window.onload = function() {
+                updateLocalFiles()
+                loadWorkspaces();
+                updateWindow();
+            }
+        </script>
+        <style type="text/css">
+            .filebox {
+                border: 1px solid lightgray;
+                border-radius: 2px;
+                min-height: 40vh;
+                max-height: 40vh;
+                max-width: 40vw;
+                overflow: scroll;
+                margin: 20px;
+            }
+            .filebox li {
+                margin: 4px;
+            }
+            .folded > ul {
+                display: none;
+            }
+            .selected {
+                background-color: #ebfaff;
+                outline: 1px solid #d0d0e4;
+            }
+            ul {
+                padding: 0
+            }
+            li {
+                padding: 0px 0 0px 24px;
+                list-style: none;
+                background-repeat: no-repeat;
+                background-position: left top;
+                background-size: 20px;
+            }
+            li span {
+                white-space: nowrap;
+                cursor: pointer;
+            }
+            .no-break {
+                white-space: nowrap;
+            }
+            .alert-container {
+                position: fixed;
+                top: 0;
+                z-index: 999;
+            }
+            button.close {
+                background-color: transparent;
+                border: 0;
+                -webkit-appearance: none;
+                float: right;
+                font-size: 1.5rem;
+                font-weight: 700;
+                line-height: 1;
+                color: #000;
+                text-shadow: 0 1px 0 #fff;
+                opacity: .5;
+                padding: 1rem;
+                margin: -1rem -1rem -1rem auto;
+            }
+            .close:focus, .close:hover {
+                color: #000;
+                text-decoration: none;
+                opacity: .75;
+            }
+        </style>
+	</head>
+	<body>
+        <nav class="navbar bg-light">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">ACME Hospital data repository</a>
+            </div>
+        </nav>
+        <div class="alert-container">
+            <div class="alert alert-danger" style="margin:20px; display: none" id="alert-div">
+                <strong>Error:</strong> <span id="alert-text"></span>
+            </div>
+            <div class="alert alert-info" style="margin:20px; display: none" id="alert-info-div">
+                <span id="alert-info-text"></span>
+            </div>
+        </div>
+        <div class="modal fade bd-example-modal-lg show" tabindex="-1" role="dialog" id="modal-dialog-wrapper">
+            <div class="modal-dialog" role="document" id="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                    <h5 class="modal-title">Please confirm</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close" onclick="do_confirm(false)">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                    </div>
+                    <div class="modal-body">
+                    <p id="modal-text"></p>
+                    </div>
+                    <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="do_confirm(true)">OK</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal" onclick="do_confirm(false)">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card" style="margin: 1em">
+            <div class="card-body">
+                <label for="target-workspace" class="form-label">Target workspace</label>		
+                <div class="input-group mb-3">
+                    <select id="target-workspace" onChange="updateContainerList()" class="form-control">
+                        <option value="">[loading]</option>
+                        <option value="[New]">Other workspace</option>
+                    </select>
+                    <button type="button" id="delete-workspace-button" class="btn btn-primary" onClick="onDeleteWorkspaceClick()">Delete key</button>
+                </div>
+                <div id="new-workspace-div">
+                    <label for="new-workspace-name" class="form-label">Add workspace API key</label>
+                    <div class="input-group mb-3">
+                        <input type="text" class="form-control" id="new-workspace-name" placeholder="dws-001-test" onkeyup="updateWindow()" onchange="updateWindow()"/>
+                    </div>
+                    <label for="new-workspace-key" class="form-label">API key</label>
+                    <div class="input-group mb-3">
+                        <input type="text" class="form-control" id="new-workspace-key" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeyup="updateWindow()" onchange="updateWindow()"/>
+                    </div>
+                    <button type="button" class="btn btn-secondary" style="float:right" id="new-workspace-button" onClick="onAddWorkspaceClick()">Add workspace</button>
+                </div>
+                <div id="target-container-div">
+                    <label for="target-container" class="form-label">Target uploading package</label>		
+                    <div class="input-group mb-3">
+                        <select id="target-container" onChange="updateRemoteFiles()" class="form-control">
+                            <option value="">[loading]</option>
+                            <option value="[New]">New upload package</option>
+                        </select>
+                        <button type="button" id="cancel-upload-button" class="btn btn-primary" onclick="onCancelUploadClick()">Cancel upload</button>
+                    </div>
+                    <div id="new-container-div">
+                        <label for="new-container-title" class="form-label">Package name</label>
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="new-container-title" placeholder="title (optional)"/>
+                        </div>
+                        <button type="button" class="btn btn-secondary" style="float:right" id="new-container-button" onClick="onAddContainerClick()">Create</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card" style="margin: 1em">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <h4 class="no-break">Files in datarepository.acme.med/data</h4>
+                        <div id="local-files" onclick="toggleselect()" class="filebox">
+                            <span>[loading]</span>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <h4 class="no-break">Files in <span id="selected-workspace-name"></span>/<span id="selected-container-identity"></span></h4>
+                        <div id="remote-files" class="filebox">
+                            <span>[loading]</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="btn-group" role="group" style="margin: auto; margin-bottom: 1em;">
+                <button type="button" id="start-upload-button" class="btn btn-primary" onclick="onStartUploadClick()">Start file upload</button>
+                <button type="button" id="commit-upload-button" class="btn btn-primary" onclick="onCommitUploadClick()">Commit upload</button>
+            </div>
+		</div>
+        <div class="fade modal-backdrop show" style="display:none" id="modal-backdrop"></div>
+	</body>
+</html>
