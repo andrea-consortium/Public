@@ -8,8 +8,8 @@ The project consists of a single API written in Python (Flask) hosting the vario
 The API is designed to be simple to interpret, so few libraries are used and where possible REST calls are used to show how to work with the API endpoints.
 The code is not production ready, it is purely meant for ***demos and educational purposes***.
 
-> #"Database'
-> workspaces = {}
+> #"Database'  
+> workspaces = {}  
 > sourcesascache = {}
 
 The database of the demo project consists of two global variables, one listing the workspaces, their keys, and cached container SAS-urls, and one caching the SAS-url for accessing the data repository.
