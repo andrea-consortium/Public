@@ -21,8 +21,9 @@ Languages used:
 3. HTML (+bootstrap)
 
 ## Configure
-To configure the API edit the config.json file. It's structure is simple and requires the API Key (Tenant Key) in the form of a uuid to be preconfigured. A anDREa admin can generate such a key for you.
+To configure the API edit the config.json file. Its structure is simple and requires the API Key (Tenant Key) in the form of a uuid to be preconfigured. An anDREa admin can generate such a key for you.
 Optionally, you can preconfigure one or more workspaces with corresponding API key in the config file, this can be usefull for demoing.
+As the demo project relies on a storage account to demonstrate a local repository, storage account details need to be added here too.
 
 ## How to run
 First install the requirements.txt, i.e.
