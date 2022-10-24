@@ -22,7 +22,7 @@ subscription_apikey = ''
 workspace_name = ''
 max_concurrency = 10
 api = 'https://andreanl-api-management.azure-api.net/v1/api'
-#pause = False
+pause = False
 ###########
 
 filequeue = queue.Queue()
