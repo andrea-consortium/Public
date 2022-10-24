@@ -90,7 +90,7 @@ def upload_file_single(blobname: str, file: io.BufferedReader) -> bool:
         'x-ms-blob-type': 'BlockBlob',
         'x-ms-date': datetime.datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
     }, method='PUT'))
-    if resp.status < 200 or resp.status > 220:
+    if resp.status < 200 or resp.status > 299:
         raise Exception(f"HTTP{resp.status}: {resp.read()}")
 
 def upload_file_chunk(blobname: str, blocknumber: int, chunk: bytes) -> int:
@@ -100,7 +100,7 @@ def upload_file_chunk(blobname: str, blocknumber: int, chunk: bytes) -> int:
         'x-ms-version': '2020-04-08',
         'x-ms-date': datetime.datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
     }, method='PUT'))
-    if resp.status < 200 or resp.status > 220:
+    if resp.status < 200 or resp.status > 299:
         raise Exception(f"HTTP{resp.status}: {resp.read()}")
 
 def finalise_chunked_file(blobname: str, chunks: int) -> bool:
@@ -114,7 +114,7 @@ def finalise_chunked_file(blobname: str, chunks: int) -> bool:
         'x-ms-version': '2020-04-08',
         'x-ms-date': datetime.datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
     }, method='PUT'))
-    if resp.status < 200 or resp.status > 220:
+    if resp.status < 200 or resp.status > 299:
         raise Exception(f"HTTP{resp.status}: {resp.read()}")
 
 #get all files passed to us
